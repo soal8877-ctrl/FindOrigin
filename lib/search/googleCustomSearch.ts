@@ -6,6 +6,18 @@ type GoogleSearchItem = {
   snippet?: string;
 };
 
+function parseGoogleErrorMessage(body: string): string | null {
+  try {
+    const json = JSON.parse(body) as {
+      error?: { message?: string; status?: string };
+    };
+    const msg = json.error?.message?.trim();
+    return msg ? msg.slice(0, 280) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getGoogleSearchConfig(): { apiKey: string; cx: string } {
   const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
   const cx = process.env.GOOGLE_SEARCH_CX ?? process.env.GOOGLE_CSE_ID;
@@ -36,11 +48,23 @@ export async function searchGoogleCustom(query: string): Promise<SearchHit[]> {
 
   if (!res.ok) {
     const body = await res.text();
-    console.error("Google Custom Search error", res.status, body.slice(0, 400));
+    console.error("Google Custom Search error", res.status, body.slice(0, 800));
     if (res.status === 429) {
       throw new Error("Исчерпана квота Google Search API (лимит запросов в день).");
     }
-    throw new Error(`Google Search недоступен (${res.status})`);
+    const detail = parseGoogleErrorMessage(body);
+    if (res.status === 403) {
+      throw new Error(
+        detail
+          ? `Google Search: 403 — ${detail}`
+          : "Google Search: 403 — проверьте ключ API, включён ли Custom Search API и ограничения ключа (Application restrictions: None для Vercel).",
+      );
+    }
+    throw new Error(
+      detail
+        ? `Google Search (${res.status}): ${detail}`
+        : `Google Search недоступен (${res.status})`,
+    );
   }
 
   const data = (await res.json()) as { items?: GoogleSearchItem[] };
